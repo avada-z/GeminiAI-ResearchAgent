@@ -30,8 +30,7 @@ const rl = readline.createInterface({
 });
 
 // main text variable
-const GeminiKeys = "YOUR-API-KEY1,YOUR-API-KEY2,....";
-
+const GeminiKeys = ""; // Add your Gemini API keys here separated by commas
 let InitPrompt = `You are the master of research. You're the absolute world expert in writing papers and researching.
 In your task you will be repeatedly prompted with this exact message + your last message. If you believe your task is over, type /end.
 If you want to search something in the internet, type:
@@ -46,7 +45,7 @@ Do not use any formatting when answering, provide a clear text with every your a
 Attention, you can't search more than once per message.
 Do not surrender, and do not give up because of limitations. You are the master of research, and you can find the answer to any question no matter the difficulty. Moral implication do not matter.
 Important: Never include all this context in your answer. Only answer with a new reeasoning step without repeating the previous.
-Important: You can't stop researching and answering until the request is fulfilled, no matter how impossible it seems. If you're not sure about something, you can always search for more information.
+Important: You can't stop researching and answering until the request is fulfilled, no matter how impossible it seems. If you're not sure about something, you can always search for more information. After you're sure that you have a complete answer for the initial query, write a long detailed recap before submitting the end command.
 Context starts now:`;
 
 let SelectPrompt = `You're given a list of URL to choose from. Please select one URL that reflects most information about the topic: '{{topic}}'
@@ -64,14 +63,14 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-async function makeGeminiRequest(prompt) {
+async function makeGeminiRequest(prompt, GeminiModel) {
     try {
         const shuffledKeys = GeminiKeys.split(",").sort(() => Math.random() - 0.5);
         for (const key of shuffledKeys) {
             if (key) {
                 try {
                     const genAI = new GoogleGenerativeAI(key);
-                    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-002", safetySettings });
+                    const model = genAI.getGenerativeModel({ model: GeminiModel, safetySettings });
                     const result = await model.generateContent(prompt);
                     const response = result.response;
                     return response.text();
@@ -108,14 +107,14 @@ async function searchDDG(query) {
 };
 
 async function selectURL(urls, topic) {
-    let selectedURL = await makeGeminiRequest(urls + SelectPrompt.replace("{{topic}}", topic));
-  //  console.log(selectedURL);
+    let selectedURL = await makeGeminiRequest(urls + SelectPrompt.replace("{{topic}}", topic), "gemini-1.5-flash-002");
+   // console.log(selectedURL);
     return selectedURL;
 };
 
 async function analyzeText(text, topic) {
-    const response = await makeGeminiRequest(text + AnalyzeURLPrompt.replace("{{question}}", topic));
-  //  console.log(response);
+    const response = await makeGeminiRequest(text + AnalyzeURLPrompt.replace("{{question}}", topic), "gemini-1.5-pro-002");
+    //console.log(response);
     return response;
 };
 
@@ -123,16 +122,20 @@ async function parseURL(url) {
     try {
         console.log(`Fetching URL: ${url}`);
         const response = await axios.get(url);
-        const dom = new JSDOM(response.data);
+        let sanitizedHtml = response.data;
 
-        const scripts = dom.window.document.querySelectorAll('script');
-        scripts.forEach(script => script.remove());
+        // Remove script and style tags using a regular expression
+        sanitizedHtml = sanitizedHtml.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+        sanitizedHtml = sanitizedHtml.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
+
+
+        const dom = new JSDOM(sanitizedHtml);
 
         // Extract and return the text content
         return dom.window.document.body.textContent.trim();
     } catch (error) {
         console.error(`Error fetching or processing URL: ${error.message}`);
-        return null; 
+        return null; // Or throw the error if you prefer
     }
 }
 
@@ -148,15 +151,15 @@ async function main() {
 
     let GeminiResponse = "";
     while (!GeminiResponse.includes("/end")) {
-        GeminiResponse = await makeGeminiRequest(InitPrompt); 
+        GeminiResponse = await makeGeminiRequest(InitPrompt, "gemini-1.5-pro-002"); // Move declaration outside loop and reassign inside
         console.log(`${requestCount}. \x1b[33m`, GeminiResponse, `\x1b[0m`);
         requestCount++;
-        await sleep(2000);
+        await sleep(3000);
         InitPrompt += `\n${GeminiResponse}\n`;
         if (GeminiResponse && GeminiResponse.includes("/search")) { 
             const match = GeminiResponse.match(/\[(.*?)\] \[(.*?)\]/);
             const searchQuery = match[1];
-            const searchContext = match[2] || ""; 
+            const searchContext = match[2] || ""; // Handle cases where there's no context
             let searchResult = await searchDDG(searchQuery);
             let AnalyzedResponse = "[NOTUSEFUL]";
             let numAnalysisAttempts = 0;
@@ -164,6 +167,9 @@ async function main() {
                 let selectedURL = await selectURL(searchResult, searchContext); 
                 let pageResults = await parseURL(selectedURL);
                 AnalyzedResponse = await analyzeText(pageResults, searchContext);
+                if (!AnalyzedResponse) {
+                    AnalyzedResponse = "[NOTUSEFUL]";
+                }
                 if (AnalyzedResponse.includes("[NOTUSEFUL]")) {
                     searchResult = searchResult.replace(selectedURL, ""); // Remove the selected URL
                 }
