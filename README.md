@@ -33,3 +33,6 @@ This project demonstrates an autonomous research agent that leverages Google's G
 
 ```bash
 npm install @google/generative-ai duck-duck-scrape axios jsdom node:readline
+```
+
+**Remember to insert your multiple API Keys in the variable!**
